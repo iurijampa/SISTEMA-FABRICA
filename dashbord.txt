@@ -1,0 +1,618 @@
+import { useState } from 'react';
+import { jsPDF } from 'jspdf';
+import './Dashboard.css';
+
+const Dashboard = ({ atividades, onEditar, onApagar, usuarioAtual }) => {
+  const criarDataLocal = (dataStr) => {
+    if (!dataStr) return null;
+    const partes = dataStr.split('-');
+    const ano = parseInt(partes[0], 10);
+    const mes = parseInt(partes[1], 10) - 1;
+    const dia = parseInt(partes[2], 10);
+    return new Date(ano, mes, dia);
+  };
+
+  const [modalAberto, setModalAberto] = useState(false);
+  const [modalEditar, setModalEditar] = useState(false);
+  const [atividadeSelecionada, setAtividadeSelecionada] = useState(null);
+
+  // Novo estado para modal concluir
+  const [modalConcluirAberto, setModalConcluirAberto] = useState(false);
+  const [atividadeParaConcluir, setAtividadeParaConcluir] = useState(null);
+
+  // Campo de filtro de busca
+  const [filtro, setFiltro] = useState('');
+
+  // Contagem por setor
+  const setorCount = atividades.reduce((acc, atividade) => {
+    acc[atividade.setorAtual] = (acc[atividade.setorAtual] || 0) + 1;
+    return acc;
+  }, {});
+
+  const badgeColors = {
+    Gabarito: 'blue',
+    Impressao: 'green',
+    Batida: 'orange',
+    Costura: 'pink',
+    Embalagem: 'purple',
+    Finalizado: 'gray',
+  };
+
+  const getPrazoBadgeClass = (dataEntrega) => {
+    if (!dataEntrega) return '';
+    const hoje = new Date();
+    const entrega = criarDataLocal(dataEntrega);
+    const diffDias = Math.ceil((entrega - hoje) / (1000 * 60 * 60 * 24));
+
+    if (diffDias > 10) return 'green';
+    if (diffDias > 5) return 'orange';
+    return 'red';
+  };
+
+  const normalizar = (str) => str?.toString().toLowerCase().trim() || '';
+
+  const atividadesFiltradas = atividades.filter((a) => {
+    const termo = normalizar(filtro);
+    if (!termo) return true;
+
+    const pedido = normalizar(a.pedido);
+    const cliente = normalizar(a.cliente);
+    const dataEntregaFormatada = a.dataEntrega
+      ? criarDataLocal(a.dataEntrega).toLocaleDateString()
+      : '';
+
+    return (
+      pedido.includes(termo) ||
+      cliente.includes(termo) ||
+      dataEntregaFormatada.includes(termo)
+    );
+  });
+
+  const atividadesOrdenadas = [...atividadesFiltradas].sort((a, b) => {
+    const dataA = criarDataLocal(a.dataEntrega);
+    const dataB = criarDataLocal(b.dataEntrega);
+    return dataA - dataB;
+  });
+
+  const abrirModal = (atividade) => {
+    setAtividadeSelecionada(atividade);
+    setModalAberto(true);
+    setModalEditar(false);
+  };
+
+  const abrirModalEditar = (atividade) => {
+    setAtividadeSelecionada(atividade);
+    setModalAberto(true);
+    setModalEditar(true);
+  };
+
+  const fecharModal = () => {
+    setModalAberto(false);
+    setModalEditar(false);
+    setAtividadeSelecionada(null);
+  };
+
+  const salvarEdicao = (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const dadosEditados = {
+      id: atividadeSelecionada.id,
+      pedido: form.pedido.value,
+      cliente: form.cliente.value,
+      imagem: form.imagem.value,
+      descricao: form.descricao.value,
+      setorAtual: form.setorAtual.value,
+      dataEntrega: form.dataEntrega.value,
+      funcionarioEnvio: atividadeSelecionada.funcionarioEnvio,
+      observacaoEnvio: atividadeSelecionada.observacaoEnvio,
+    };
+    onEditar(dadosEditados);
+    fecharModal();
+  };
+
+  // Função para obter o próximo setor da sequência
+  const setores = ['Gabarito', 'Impressao', 'Batida', 'Costura', 'Embalagem', 'Finalizado'];
+  const proximoSetor = (setorAtual) => {
+    const indexAtual = setores.indexOf(setorAtual);
+    if (indexAtual === -1 || indexAtual === setores.length - 1) {
+      return setorAtual;
+    }
+    return setores[indexAtual + 1];
+  };
+
+  // NOVAS FUNÇÕES para modal concluir
+
+  const abrirModalConcluir = (atividade) => {
+    setAtividadeParaConcluir(atividade);
+    setModalConcluirAberto(true);
+  };
+
+  const fecharModalConcluir = () => {
+    setModalConcluirAberto(false);
+    setAtividadeParaConcluir(null);
+  };
+
+  // ALTERAÇÃO AQUI: adicionando a dataEnvio com data/hora atual
+  const concluirAtividadeComDados = (nomeFuncionario, observacao) => {
+    if (!atividadeParaConcluir) return;
+
+    const novoSetor = proximoSetor(atividadeParaConcluir.setorAtual);
+    if (novoSetor === atividadeParaConcluir.setorAtual) {
+      alert('Esta atividade já está no setor Finalizado.');
+      fecharModalConcluir();
+      return;
+    }
+
+    if (!nomeFuncionario.trim() || !observacao.trim()) {
+      alert('Nome do funcionário e observação são obrigatórios.');
+      return;
+    }
+
+    onEditar({
+      ...atividadeParaConcluir,
+      setorAtual: novoSetor,
+      funcionarioEnvio: nomeFuncionario.trim(),
+      observacaoEnvio: observacao.trim(),
+      dataEnvio: new Date().toISOString(), // <-- adiciona data e hora da ação
+    });
+
+    fecharModalConcluir();
+  };
+
+  // Função para gerar PDF da atividade selecionada
+ const gerarPDF = () => {
+  if (!atividadeSelecionada) return;
+
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const margemEsq = 20;
+  const margemDir = 20;
+  const margemTopo = 30;
+  const espacamentoColunas = 12;
+  const espacamentoImagem = 10;
+
+  const larguraColunaEsq = (pageWidth - margemEsq - margemDir - espacamentoColunas) / 2;
+  const larguraColunaDir = larguraColunaEsq;
+
+  const imagens = [];
+  if (Array.isArray(atividadeSelecionada.imagem)) {
+    atividadeSelecionada.imagem.forEach((img) => imagens.push(img));
+  } else if (atividadeSelecionada.imagem) {
+    imagens.push(atividadeSelecionada.imagem);
+  }
+
+  const desenharRodape = (pagina) => {
+    const dataGeracao = new Date().toLocaleString();
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    const rodape = `PDF gerado em: ${dataGeracao} - Página ${pagina}`;
+    const rodapeX = pageWidth - margemDir - doc.getTextWidth(rodape);
+    doc.text(rodape, rodapeX, pageHeight - 10);
+  };
+
+  const desenharCabecalhoPrincipal = () => {
+    const dataEntrega = atividadeSelecionada.dataEntrega
+      ? criarDataLocal(atividadeSelecionada.dataEntrega).toLocaleDateString()
+      : 'Data não informada';
+    const textoData = `Entrega: ${dataEntrega}`;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(30);
+    const textoX = pageWidth / 2 - doc.getTextWidth(textoData) / 2;
+    const textoY = margemTopo;
+    doc.setTextColor(150);
+    doc.text(textoData, textoX + 1.5, textoY + 1.5);
+    doc.setTextColor(10, 10, 10);
+    doc.text(textoData, textoX, textoY);
+  };
+
+  const desenharColunaDireita = () => {
+    const x = margemEsq + larguraColunaEsq + espacamentoColunas;
+    const y = margemTopo + 30;
+    const alturaConteudo = pageHeight - margemTopo - 40;
+
+    doc.setFillColor(245, 245, 245);
+    doc.rect(x - 5, y - 10, larguraColunaDir + 10, alturaConteudo, 'F');
+
+    let yTexto = y;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Cliente:', x, yTexto);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(13);
+    doc.text(atividadeSelecionada.cliente || '-', x + 30, yTexto);
+
+    yTexto += 20;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Pedido:', x, yTexto);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(13);
+    doc.text(atividadeSelecionada.pedido || '-', x + 30, yTexto);
+
+    yTexto += 30;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.setTextColor(50, 50, 50);
+    const descricao = atividadeSelecionada.descricao || '-';
+    const linhasDescricao = doc.splitTextToSize(descricao, larguraColunaDir);
+    doc.text(linhasDescricao, x, yTexto);
+  };
+
+  const desenharLinhaSeparadora = () => {
+    const xLinha = margemEsq + larguraColunaEsq + espacamentoColunas / 2;
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.3);
+    doc.line(xLinha, margemTopo, xLinha, pageHeight - 30);
+  };
+
+  if (imagens.length === 0) {
+    // Caso sem imagens
+    desenharCabecalhoPrincipal();
+    desenharLinhaSeparadora();
+    desenharColunaDireita();
+    desenharRodape(1);
+    doc.save(`pedido_${atividadeSelecionada.pedido}.pdf`);
+    return;
+  }
+
+  // Caso com imagens
+  const carregarImagem = (url) =>
+  new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      let imgWidth = img.width;
+      let imgHeight = img.height;
+      if (imgWidth > larguraColunaEsq) {
+        const ratio = larguraColunaEsq / imgWidth;
+        imgWidth = larguraColunaEsq;
+        imgHeight = imgHeight * ratio;
+      }
+      resolve({ imgData: url, width: imgWidth, height: imgHeight });
+    };
+    img.onerror = () => {
+      console.warn(`Imagem não carregada: ${url}`);
+      resolve(null); // retorna null, e o PDF vai ignorar
+    };
+    img.src = url;
+  });
+
+  Promise.all(imagens.map(carregarImagem))
+    .then((imgsConvertidas) => {
+      let paginaAtual = 1;
+
+      desenharCabecalhoPrincipal();
+      desenharLinhaSeparadora();
+      desenharColunaDireita();
+
+      let yImagem = margemTopo + 30;
+
+     const imagensValidas = imgsConvertidas.filter((img) => img && img.height && img.width);
+
+for (let i = 0; i < imagensValidas.length; i++) {
+  const img = imagensValidas[i];
+
+  if (yImagem + img.height > pageHeight - 40) {
+
+          desenharRodape(paginaAtual);
+          doc.addPage();
+          paginaAtual++;
+          yImagem = margemTopo + 20;
+        }
+
+        doc.addImage(img.imgData, 'JPEG', margemEsq, yImagem, img.width, img.height);
+        yImagem += img.height + espacamentoImagem;
+      }
+
+      desenharRodape(paginaAtual);
+      doc.save(`pedido_${atividadeSelecionada.pedido}.pdf`);
+    })
+    .catch((erro) => {
+      console.error('Erro ao gerar PDF:', erro);
+      alert('Erro ao carregar imagens para gerar PDF.');
+    });
+};
+
+  return (
+    <div className="dashboard">
+      <h1>Dashboard</h1>
+
+      {/* Campo de busca */}
+      <input
+        type="text"
+        placeholder="Buscar por cliente, pedido ou data de entrega"
+        value={filtro}
+        onChange={(e) => setFiltro(e.target.value)}
+        style={{ marginBottom: '16px', padding: '8px', width: '100%', maxWidth: '400px' }}
+      />
+
+      <div className="cards">
+        {Object.entries(setorCount).map(([setor, count]) => (
+          <div key={setor} className="card">
+            <div>{setor}</div>
+            <div className={`badge badge-setor ${badgeColors[setor] || ''}`}>{count}</div>
+          </div>
+        ))}
+      </div>
+
+      <h2>Atividades</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Foto</th>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th>Setor Atual</th>
+            <th>Data de Entrega</th>
+            <th>Enviado Por</th>
+            <th>Observação</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {atividadesOrdenadas.map((a) => (
+            <tr key={a.id}>
+              <td>
+                <img src={a.imagem} alt="produto" width="40" />
+              </td>
+              <td>{a.pedido}</td>
+              <td>{a.cliente}</td>
+              <td>
+                <span className={`badge badge-setor ${badgeColors[a.setorAtual] || ''}`}>
+                  {a.setorAtual}
+                </span>
+              </td>
+              <td>
+                <span className={`badge badge-prazo ${getPrazoBadgeClass(a.dataEntrega)}`}>
+                  {a.dataEntrega ? criarDataLocal(a.dataEntrega).toLocaleDateString() : '-'}
+                </span>
+              </td>
+              {/* ALTERAÇÃO AQUI: mostrar nome + data/hora da ação */}
+              <td>
+                {a.funcionarioEnvio || '-'}
+                {a.dataEnvio && (
+                  <div style={{ fontSize: '0.8em', color: '#666' }}>
+                    {new Date(a.dataEnvio).toLocaleString()}
+                  </div>
+                )}
+              </td>
+              <td>{a.observacaoEnvio || '-'}</td>
+
+              <td>
+                <button
+                  title="Visualizar"
+                  onClick={() => abrirModal(a)}
+                  style={{ marginRight: '8px' }}
+                >
+                  👁️
+                </button>
+
+                {usuarioAtual === 'admin' && (
+                  <>
+                    <button
+                      title="Editar"
+                      onClick={() => abrirModalEditar(a)}
+                      style={{ marginRight: '8px' }}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      title="Apagar"
+                      onClick={() => {
+                        if (window.confirm('Quer mesmo apagar este pedido?')) {
+                          onApagar(a.id);
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </>
+                )}
+
+                {/* Botão concluir para enviar ao próximo setor */}
+                {usuarioAtual !== 'finalizado' && a.setorAtual.toLowerCase() !== 'finalizado' && (
+                  <button
+                    title="Concluir e enviar para o próximo setor"
+                    onClick={() => abrirModalConcluir(a)}
+                    style={{ marginLeft: '8px' }}
+                  >
+                    ✅
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Modal detalhes e edição */}
+      {modalAberto && atividadeSelecionada && (
+        <div className="modalOverlay" onClick={fecharModal}>
+          <div
+            className="modalContent"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              padding: '20px',
+              borderRadius: '12px',
+              maxWidth: '500px',
+              margin: '50px auto',
+            }}
+          >
+            {!modalEditar ? (
+              <>
+                <h2>Detalhes do Pedido</h2>
+                <img
+                  src={atividadeSelecionada.imagem}
+                  alt="produto"
+                  width="100%"
+                  style={{ marginBottom: '10px' }}
+                />
+                <p>
+                  <strong>Pedido:</strong> {atividadeSelecionada.pedido}
+                </p>
+                <p>
+                  <strong>Cliente:</strong> {atividadeSelecionada.cliente}
+                </p>
+                <p>
+                  <strong>Descrição:</strong> {atividadeSelecionada.descricao}
+                </p>
+                <p>
+                  <strong>Setor Atual:</strong> {atividadeSelecionada.setorAtual}
+                </p>
+                <p>
+                  <strong>Data de Entrega:</strong>{' '}
+                  {atividadeSelecionada.dataEntrega
+                    ? criarDataLocal(atividadeSelecionada.dataEntrega).toLocaleDateString()
+                    : '-'}
+                </p>
+                <p>
+                  <strong>Enviado por:</strong> {atividadeSelecionada.funcionarioEnvio || '-'}
+                </p>
+                <p>
+                  <strong>Observação:</strong> {atividadeSelecionada.observacaoEnvio || '-'}
+                </p>
+
+                {/* Botão Gerar PDF */}
+                <button
+                  onClick={gerarPDF}
+                  style={{
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    marginTop: '10px',
+                  }}
+                >
+                  Gerar PDF
+                </button>
+
+                <button
+                  onClick={fecharModal}
+                  style={{
+                    backgroundColor: '#888',
+                    color: 'white',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    marginTop: '10px',
+                    marginLeft: '10px',
+                  }}
+                >
+                  Fechar
+                </button>
+              </>
+            ) : (
+              <>
+                <h2>Editar Pedido</h2>
+                <form onSubmit={salvarEdicao}>
+                  <label>
+                    Pedido:
+                    <input type="text" name="pedido" defaultValue={atividadeSelecionada.pedido} />
+                  </label>
+                  <br />
+                  <label>
+                    Cliente:
+                    <input type="text" name="cliente" defaultValue={atividadeSelecionada.cliente} />
+                  </label>
+                  <br />
+                  <label>
+                    URL da Imagem:
+                    <input type="text" name="imagem" defaultValue={atividadeSelecionada.imagem} />
+                  </label>
+                  <br />
+                  <label>
+                    Descrição:
+                    <textarea name="descricao" defaultValue={atividadeSelecionada.descricao} />
+                  </label>
+                  <br />
+                  <label>
+                    Setor Atual:
+                    <select name="setorAtual" defaultValue={atividadeSelecionada.setorAtual}>
+                      {setores.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <br />
+                  <label>
+                    Data de Entrega:
+                    <input
+                      type="date"
+                      name="dataEntrega"
+                      defaultValue={atividadeSelecionada.dataEntrega}
+                    />
+                  </label>
+                  <br />
+                  <button type="submit">Salvar</button>
+                  <button type="button" onClick={fecharModal} style={{ marginLeft: '10px' }}>
+                    Cancelar
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal concluir */}
+      {modalConcluirAberto && atividadeParaConcluir && (
+        <div className="modalOverlay" onClick={fecharModalConcluir}>
+          <div
+            className="modalContent"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              padding: '20px',
+              borderRadius: '12px',
+              maxWidth: '400px',
+              margin: '50px auto',
+            }}
+          >
+            <h2>Concluir e Enviar para o Próximo Setor</h2>
+            <p>
+              Pedido: <strong>{atividadeParaConcluir.pedido}</strong>
+            </p>
+            <p>
+              Setor Atual: <strong>{atividadeParaConcluir.setorAtual}</strong>
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const nomeFuncionario = e.target.nomeFuncionario.value;
+                const observacao = e.target.observacao.value;
+                concluirAtividadeComDados(nomeFuncionario, observacao);
+              }}
+            >
+              <label>
+                Seu Nome:
+                <input type="text" name="nomeFuncionario" required />
+              </label>
+              <br />
+              <label>
+                Observação:
+                <textarea name="observacao" required />
+              </label>
+              <br />
+              <button type="submit">Concluir</button>
+              <button type="button" onClick={fecharModalConcluir} style={{ marginLeft: '10px' }}>
+                Cancelar
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Dashboard;
