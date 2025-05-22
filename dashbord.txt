@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import { jsPDF } from 'jspdf';
 import './Dashboard.css';
 
-const Dashboard = ({ atividades, onEditar, onApagar, usuarioAtual }) => {
+const Dashboard = ({ atividades, onVisualizar, onEditar, onApagar, usuarioAtual }) => {
   const criarDataLocal = (dataStr) => {
     if (!dataStr) return null;
     const partes = dataStr.split('-');
