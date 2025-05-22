@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import CadastroPedido from './CadastroPedido';
+import { supabase } from '../supabaseClient';
 import { jsPDF } from 'jspdf';
 import './Dashboard.css';
 
@@ -16,6 +18,8 @@ const Dashboard = ({ atividades, onEditar, onApagar, usuarioAtual }) => {
   const [modalEditar, setModalEditar] = useState(false);
   const [atividadeSelecionada, setAtividadeSelecionada] = useState(null);
 
+  
+  
   // Novo estado para modal concluir
   const [modalConcluirAberto, setModalConcluirAberto] = useState(false);
   const [atividadeParaConcluir, setAtividadeParaConcluir] = useState(null);
@@ -320,6 +324,15 @@ for (let i = 0; i < imagensValidas.length; i++) {
     <div className="dashboard">
       <h1>Dashboard</h1>
 
+            <div className="cards">
+        {Object.entries(setorCount).map(([setor, count]) => (
+          <div key={setor} className="card">
+            <div>{setor}</div>
+            <div className={`badge badge-setor ${badgeColors[setor] || ''}`}>{count}</div>
+          </div>
+        ))}
+      </div>
+
       {/* Campo de busca */}
       <input
         type="text"
@@ -328,15 +341,6 @@ for (let i = 0; i < imagensValidas.length; i++) {
         onChange={(e) => setFiltro(e.target.value)}
         style={{ marginBottom: '16px', padding: '8px', width: '100%', maxWidth: '400px' }}
       />
-
-      <div className="cards">
-        {Object.entries(setorCount).map(([setor, count]) => (
-          <div key={setor} className="card">
-            <div>{setor}</div>
-            <div className={`badge badge-setor ${badgeColors[setor] || ''}`}>{count}</div>
-          </div>
-        ))}
-      </div>
 
       <h2>Atividades</h2>
       <table>
